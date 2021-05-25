@@ -17,13 +17,20 @@ library(flexdashboard)
 library(shiny)
 library(ggplot2)
 library(data.table)
+# tags$head(includeHTML(("analytics.html")))
 ```
 
 ```{r, include = F}
+library(GAlogger)
+ga_set_tracking_id("UA-197867107-1")
+ga_set_approval(consent = TRUE)
+
+ga_collect_pageview(page = "/main")
+
 load("data/results.Rdata")
 
 rank2logFC <- function(x, title = ""){
-  ggplot(x, mapping = aes(x = rank, y = logFC, col = adj.P.Val)) +
+  ggplot(x, mapping = aes(x = Rank, y = logFC, col = adj.P.Val)) +
     geom_point() +
     geom_hline(yintercept = 0, color = "gray") +
     scale_color_gradient(trans = "log", low = "red", high = "black", 
@@ -36,7 +43,7 @@ rank2logFC <- function(x, title = ""){
 }
 
 tissueComp <- function(gene){
-  ggplot(dat[gene,], aes(x = rank, y = logFC, shape = L1, col = adj.P.Val)) +
+  ggplot(dat[gene,], aes(x = Rank, y = logFC, shape = Tissue, col = adj.P.Val)) +
     geom_point(size = 5) +
     geom_hline(yintercept = 0, color = "black", lty = "dotted", size = 2) +
     geom_blank(data = data.frame(adj.P.Val = c(min(dat$adj.P.Val), 0.05, 1)), 
@@ -50,7 +57,7 @@ tissueComp <- function(gene){
                                                     skeletal = "square")) +
     theme_bw() +
     ylab("logFC (IR/T2D vs NGT)") +
-    facet_wrap(~value) 
+    facet_wrap(~Symbol) 
 }
 
 ```
@@ -68,9 +75,12 @@ Column {data-width=400}
 
 
 ```{r}
-output$adiposePlot <- renderPlot(rank2logFC(dat[L1 == "adipose"&abs(logFC)>.32,], "Adipose tissue"))
-output$betaPlot <- renderPlot(rank2logFC(dat[L1 == "beta"&abs(logFC)>.32,], "Beta cell"))
-output$skeletalPlot <- renderPlot(rank2logFC(dat[L1 == "skeletal"&abs(logFC)>.32,], "Skeletal muscle"))
+output$adiposePlot <- renderPlot(rank2logFC(dat[Tissue == "adipose"&abs(logFC)>.32,], 
+                                            "Adipose tissue"))
+output$betaPlot <- renderPlot(rank2logFC(dat[Tissue == "beta"&abs(logFC)>.32,], 
+                                         "Beta cell"))
+output$skeletalPlot <- renderPlot(rank2logFC(dat[Tissue == "skeletal"&abs(logFC)>.32,], 
+                                             "Skeletal muscle"))
 ```
 
 ### Adipose tissue
@@ -95,10 +105,10 @@ Column {data-width=600}
 --------------------------------------------------
 
 ```{r}
-
 gene <- reactiveValues(gene = "SLC2A4")
 
 observeEvent(input$gene, {
+  ga_collect_event(event_category = "Gene input", event_action = "typed gene")
   gene$gene <- input$gene
 })
 
@@ -106,29 +116,29 @@ observeEvent(c(input$skeletalBrush,
                input$betaBrush,
                input$adiposeBrush),{
                  temp <- c(
-                   brushedPoints(dat[L1 == "adipose" & abs(logFC)>.32,], 
-                                 input$adiposeBrush, "rank", "logFC")$value,
-                   brushedPoints(dat[L1 == "beta" & abs(logFC)>.32,], 
-                                 input$betaBrush, "rank", "logFC")$value,
-                   brushedPoints(dat[L1 == "skeletal" & abs(logFC)>.32,], 
-                                 input$skeletalBrush, "rank", "logFC")$value)
+                   brushedPoints(dat[Tissue == "adipose" & abs(logFC)>.32,], 
+                                 input$adiposeBrush, "Rank", "logFC")$Symbol,
+                   brushedPoints(dat[Tissue == "beta" & abs(logFC)>.32,], 
+                                 input$betaBrush, "Rank", "logFC")$Symbol,
+                   brushedPoints(dat[Tissue == "skeletal" & abs(logFC)>.32,], 
+                                 input$skeletalBrush, "Rank", "logFC")$Symbol)
                  gene$gene <- temp
                })
 
 observeEvent(gene$gene, {
   print(gene$gene)
-  if(length(gene$gene)>5){
-    # gene$gene <- NULL
+  if(length(gene$gene)>10){
+    ga_collect_event(event_category = "Gene input", event_action = "Brushed too many genes")
     temp <- ggplot(data.frame(x = 1, y = 1, label = "Too many genes to visualize"), 
                    aes(x,y,label = label)) + geom_text() + theme_void()
     output$genes <- renderPlot(temp)
-    # showNotification("Too many genes to visualize")
   }else{
     if(length(gene$gene)==0){
       temp <- ggplot(data.frame(x = 1, y = 1, label = "Select interesting genes from from the plots"), 
                    aes(x,y,label = label)) + geom_text() + theme_void()
       output$genes <- renderPlot(temp)
     }else{
+      ga_collect_event(event_category = "Gene input", event_action = "Brushed less than 10 genes")
       output$genes <- renderPlot(tissueComp(as.character(gene$gene)))
     }
   }
@@ -143,7 +153,11 @@ plotOutput("genes")
 
 ### Table
 ```{r}
-renderDataTable(dat[value %in% gene$gene, c("value", "L1", "logFC", "adj.P.Val", "rank")][order(L1)],
+renderDataTable(dat[Symbol %in% gene$gene, c("Symbol", 
+                                             "Tissue", 
+                                             "logFC", 
+                                             "adj.P.Val", 
+                                             "Rank")][order(Symbol)],
                 options = list(paginate = FALSE))
 ```
 
