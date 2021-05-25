@@ -36,7 +36,7 @@ rank2logFC <- function(x, title = ""){
     scale_color_gradient(trans = "log", low = "red", high = "black", 
                          breaks = c(0, 0.001, 0.05, 0.5)) +
     scale_shape(name = "Tissue") +
-    xlab("Rank (high expression -> low expression") + 
+    xlab("Rank (high expression -> low expression)") + 
     ylab("logFC (IR/T2D vs NGT)") +
     ggtitle(title) +
     theme_bw()
