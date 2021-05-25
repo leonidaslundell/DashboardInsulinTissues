@@ -1,0 +1,265 @@
+---
+title: "Creating a gene expression resource"
+author: "Leonidas Lundell PhD"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    theme: sandstone
+    highlight: zenburn
+    toc: true
+    toc_float: true
+    smooth_scroll: true
+    collapsed: false
+    toc_depth: 3
+    chunk_output_type: console
+editor_options: 
+  chunk_output_type: console
+---
+
+<left>
+![](ku.png){ width=25% height=25% }
+</left>
+
+<hr style="height:7px;border-width:0;background-color:#F9F5EF">
+
+<br>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      message = FALSE,
+                      root.dir = '../')
+
+```
+
+```{r Load functions and data, include=FALSE}
+rm(list = ls())
+
+library("data.table")
+library("ggplot2")
+library("patchwork")
+
+library(beepr)
+```
+
+# Introduction
+
+While there are many tools summarizing results, none that i know summarize T2D in various tissues. This scrip analyzes, and a diffent flexdashboard script visualizes them.
+
+# Analysis
+
+## Download the data
+
+```{r, message=F}
+library(GEOquery)
+
+# adipose
+gsetAdi <- getGEO("GSE40234", GSEMatrix =TRUE, AnnotGPL = T, destdir = "./data", getGPL = T)
+gsetAdi <- gsetAdi$GSE40234_series_matrix.txt.gz
+
+# beta cell
+gsetBeta <- getGEO("GSE76894", GSEMatrix =TRUE, AnnotGPL = T, destdir = "./data", getGPL = T)
+gsetBeta <- gsetBeta$GSE76894_series_matrix.txt.gz
+
+# skeletal muslce
+gsetSKM <- getGEO("GSE18732", GSEMatrix = TRUE, AnnotGPL = T, destdir = "./data", getGPL = T)
+gsetSKM <- gsetSKM$GSE18732_series_matrix.txt.gz
+```
+
+Make one list object to look everything smoothly. Clean up and standardize the data.
+
+```{r, message = T}
+####################################################
+#adipose - Agilent-014850 looks good.
+
+fdata <- fData(gsetAdi)
+colnames(fdata)[3:4] <- c("SYMBOL", "ENTREZID")
+print(paste0("Number of probes interogating the same gene in adipose tissue: ",
+             sum(duplicated(fdata$SYMBOL))))
+
+pdata <- pData(gsetAdi)
+pdata$diagnosis <- pdata$`phenotype:ch1`
+pdata$diagnosis <- as.factor(pdata$diagnosis)
+levels(pdata$diagnosis) <- c("IR","NGT")
+
+ex <- as.data.table(exprs(gsetAdi))
+ex <- log2(ex)
+
+dat <- list(adipose = list(pheno = pdata,
+                           feature = as.data.table(fdata),
+                           ex = ex))
+
+####################################################
+#beta cell - classic U133_Plus_2
+
+fdata <- fData(gsetBeta)
+colnames(fdata)[3:4] <- c("SYMBOL", "ENTREZID")
+print(paste0("Number of probes interogating the same gene in beta cells: ",
+             sum(duplicated(fdata$SYMBOL))))
+
+pdata <- pData(gsetBeta)
+pdata$diagnosis <- as.factor(pdata$`diabetes status (nd (non-diabetic), t2d (type 2 diabetic)):ch1`)
+levels(pdata$diagnosis) <- c("NGT","IR")
+
+ex <- as.data.table(exprs(gsetBeta))
+
+dat$beta <- list(pheno = pdata,
+                 feature = as.data.table(fdata),
+                 ex = ex)
+
+####################################################
+#SKM - some stupid CDF. is actually U133_Plus_2 (GPL570)
+
+fdata <- fData(gsetSKM)
+rownames(gsetSKM) <- gsub("_at","", rownames(gsetSKM))
+fdata <- gsub("_at","", gsetSKM@featureData@data[,"ID"])
+
+library(biomaRt)
+ensembl <- useMart("ensembl", dataset="hsapiens_gene_ensembl")
+
+fdata <- getBM(attributes=c("ensembl_gene_id", "hgnc_symbol","ensembl_transcript_id"),
+               filters = "ensembl_transcript_id",
+               values = fdata,
+               mart = ensembl)
+fdata <- as.data.table(fdata)
+
+colnames(fdata) <- c("ENSG","SYMBOL","ENST")
+print(paste0("Number of probes interogating the same gene: ", sum(duplicated(fdata$SYMBOL))))
+
+pdata <- gsetSKM@phenoData@data
+colnames(pdata) <- make.names(colnames(pdata))
+pdata$diagnosis <- pdata$title
+pdata$diagnosis <- gsub("muscle_|_[0-9][0-9][0-9][0-9][0-9]", "", pdata$diagnosis)
+pdata$diagnosis <- as.factor(pdata$diagnosis)
+levels(pdata$diagnosis) <- c("IR","IGT","NGT")
+
+ex <- exprs(gsetSKM)
+ex <- ex[fdata$ENST,]
+ex <- log2(ex)
+
+dat$skeletal <- list(pheno = pdata,
+                     feature = as.data.table(fdata),
+                     ex = as.data.table(ex))
+
+```
+
+## Collapsing duplicate gene names and cleaning up pheno data.
+
+lapply to take highest average.
+
+```{r}
+dat <- lapply(dat, \(tiss){
+
+  tiss$ex <- tiss$ex[,.SD[which.max(rowMeans(.SD)),], by = tiss$feature$SYMBOL]
+
+  tiss$feature <- as.data.table(tiss$feature)
+  setkey(tiss$feature, "SYMBOL")
+  tiss$feature <- tiss$feature[!duplicated(SYMBOL)]
+  tiss$feature <- tiss$feature[tiss$ex$tiss,]
+
+  tiss$ex <- tiss$ex[,-1]
+
+  tiss
+})
+
+```
+
+# Differential expression
+
+Simple limma model of IR/T2D - NGT. No blocking.
+
+```{r}
+library(limma)
+
+dat <- lapply(dat, \(tiss){
+
+  design <- model.matrix(~0 + diagnosis, tiss$pheno)
+  
+  fit <- lmFit(tiss$ex, design)
+  
+  cont.matrix <- makeContrasts(diagnosisIR - diagnosisNGT, levels = colnames(design))
+  fit2 <- contrasts.fit(fit, cont.matrix)
+
+  # compute statistics and table of top significant genes
+  fit2 <- eBayes(fit2)
+  tiss$res <- topTable(fit2, adjust="fdr", number=Inf, genelist = tiss$feature$SYMBOL)
+
+  #also add the cpm rank rand
+  tiss$res$rank <- order(tiss$res$logFC, decreasing = T)
+
+  tiss$res <- as.data.table(tiss$res)
+
+  tiss
+})
+```
+
+# QC
+
+Very highlevel: boxplot of each array, and p value distributions.
+
+## Data distribution
+
+```{r, fig.align='center', fig.width=10}
+par(mfrow = c(1,3))
+for(tiss in names(dat)){
+ boxplot(dat[[tiss]]$ex, main = tiss, xaxt="n", cex = .2)
+}
+```
+
+## p-value distribution
+
+```{r, fig.align='center', fig.width=10}
+par(mfrow = c(1,3))
+for(tiss in names(dat)){
+ hist(dat[[tiss]]$res$P.Value, main = tiss, xlab = "")
+}
+```
+
+Look good.
+
+# Quick results exploration
+
+```{r}
+library(UpSetR)
+datUpset <- lapply(dat, \(tiss){
+  tiss$res$ID[tiss$res$adj.P.Val<0.05]
+})
+
+upset(fromList(datUpset))
+```
+
+Interesting how unique the adipose tissue response is compared to the beta cell.
+
+# Export
+
+```{r}
+dat <- lapply(dat, function(x) x$res[,c( "ID", "logFC", "adj.P.Val", "rank")])
+
+dat <- reshape2::melt(dat, id.vars = c("logFC", "adj.P.Val", "rank"))
+dat <- as.data.table(dat)
+colnames(dat) <- c("logFC", "adj.P.Val", "Rank", "variable", "Symbol", "Tissue")
+dat <- dat[,-4]
+setkey(dat, "Symbol")
+
+save(dat, file = "data/results.Rdata")
+```
+
+
+```{r completetion sound, echo = F}
+options(error = function(){    # Beep on error
+  beepr::beep()
+  Sys.sleep(1)
+  }
+ )
+
+.Last <- function() {          # Beep on exiting session
+  beepr::beep()
+  Sys.sleep(1)
+  }
+```
+
+# Session info
+
+```{r, message = T}
+sessionInfo()
+```
+
