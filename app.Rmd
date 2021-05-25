@@ -22,14 +22,17 @@ library(data.table)
 
 ```{r, include = F}
 library(GAlogger)
-ga_set_tracking_id("UA-197867107-1")
+ga_set_tracking_id(as.character(read.table("BigBrotherCookie.txt", header = F)))
 ga_set_approval(consent = TRUE)
 
 ga_collect_pageview(page = "/main")
 
 load("data/results.Rdata")
 
-rank2logFC <- function(x, title = ""){
+rank2logFC <- function(x, title = "", 
+                       xZoom = c(NA, NA),
+                       yZoom = c(NA, NA)){
+  
   ggplot(x, mapping = aes(x = Rank, y = logFC, col = adj.P.Val)) +
     geom_point() +
     geom_hline(yintercept = 0, color = "gray") +
@@ -38,8 +41,9 @@ rank2logFC <- function(x, title = ""){
     scale_shape(name = "Tissue") +
     xlab("Rank (high expression -> low expression)") + 
     ylab("logFC (IR/T2D vs NGT)") +
-    ggtitle(title) +
+    coord_cartesian(xlim = xZoom, ylim = yZoom) +
     theme_bw()
+  
 }
 
 tissueComp <- function(gene){
@@ -73,32 +77,99 @@ textInput("gene", value = "SLC2A4", label = "Type gene of interest")
 Column {data-width=400}
 --------------------------------------------------
 
-
-```{r}
-output$adiposePlot <- renderPlot(rank2logFC(dat[Tissue == "adipose"&abs(logFC)>.32,], 
-                                            "Adipose tissue"))
-output$betaPlot <- renderPlot(rank2logFC(dat[Tissue == "beta"&abs(logFC)>.32,], 
-                                         "Beta cell"))
-output$skeletalPlot <- renderPlot(rank2logFC(dat[Tissue == "skeletal"&abs(logFC)>.32,], 
-                                             "Skeletal muscle"))
-```
-
 ### Adipose tissue
 
 ```{r}
-plotOutput("adiposePlot", brush = "adiposeBrush")
+ranges <- reactiveValues(x = NULL, y = NULL)
+```
+
+**Click once for zooming in, double click for zooming out.**
+
+```{r}
+plotOutput("adiposePlot", brush = "adiposeBrush", click = "adiposeZoomIn", dblclick = "adiposeZoomOut")
+
+output$adiposePlot <- renderPlot(
+  rank2logFC(dat[Tissue == "adipose"&abs(logFC)>.32,], 
+             "Adipose tissue")
+)
+output$adiposePlot <- renderPlot(
+    rank2logFC(dat[Tissue == "adipose"&abs(logFC)>.32,], 
+               xZoom = ranges$x,
+               yZoom = ranges$y,
+               "Adipose tissue")
+  )
+
+observeEvent(input$adiposeZoomIn, {
+  ga_collect_event(event_category = "Plot manipulation", event_action = "Zooming in")
+  if(!is.null(input$adiposeBrush)){
+    ranges$x <- c(input$adiposeBrush$xmin, input$adiposeBrush$xmax)
+    ranges$y <- c(input$adiposeBrush$ymin, input$adiposeBrush$ymax) 
+  }
+})
+observeEvent(input$adiposeZoomOut, {
+  ga_collect_event(event_category = "Plot manipulation", event_action = "Zooming out")
+  ranges$x <- c(NA, NA)
+  ranges$y <- c(NA, NA)
+})
 ```
 
 ### Beta cell
 
 ```{r}
-plotOutput("betaPlot", brush = "betaBrush")
+plotOutput("betaPlot", brush = "betaBrush", click = "betaZoomIn", dblclick = "betaZoomOut")
+
+output$betaPlot <- renderPlot(
+  rank2logFC(dat[Tissue == "beta"&abs(logFC)>.32,], 
+             "beta tissue")
+)
+output$betaPlot <- renderPlot(
+    rank2logFC(dat[Tissue == "beta"&abs(logFC)>.32,], 
+               xZoom = ranges$x,
+               yZoom = ranges$y,
+               "beta tissue")
+  )
+
+observeEvent(input$betaZoomIn, {
+  ga_collect_event(event_category = "Plot manipulation", event_action = "Zooming in")
+  if(!is.null(input$betaBrush)){
+    ranges$x <- c(input$betaBrush$xmin, input$betaBrush$xmax)
+    ranges$y <- c(input$betaBrush$ymin, input$betaBrush$ymax) 
+  }
+})
+observeEvent(input$betaZoomOut, {
+  ga_collect_event(event_category = "Plot manipulation", event_action = "Zooming out")
+  ranges$x <- c(NA, NA)
+  ranges$y <- c(NA, NA)
+})
 ```
 
 ### Skeletal muscle
 
 ```{r}
-plotOutput("skeletalPlot", brush = "skeletalBrush")
+plotOutput("skeletalPlot", brush = "skeletalBrush", click = "skeletalZoomIn", dblclick = "skeletalZoomOut")
+
+output$skeletalPlot <- renderPlot(
+  rank2logFC(dat[Tissue == "skeletal"&abs(logFC)>.32,], 
+             "skeletal tissue")
+)
+output$skeletalPlot <- renderPlot(
+    rank2logFC(dat[Tissue == "skeletal"&abs(logFC)>.32,], 
+               xZoom = ranges$x,
+               yZoom = ranges$y,
+               "skeletal tissue")
+  )
+
+observeEvent(input$skeletalZoomIn, {
+  if(!is.null(input$skeletalBrush)){
+    ranges$x <- c(input$skeletalBrush$xmin, input$skeletalBrush$xmax)
+    ranges$y <- c(input$skeletalBrush$ymin, input$skeletalBrush$ymax) 
+  }
+})
+observeEvent(input$skeletalZoomOut, {
+  ga_collect_event(event_category = "Plot manipulation", event_action = "Zooming out")
+  ranges$x <- c(NA, NA)
+  ranges$y <- c(NA, NA)
+})
 ```
 
 Column {data-width=600}
@@ -145,13 +216,14 @@ observeEvent(gene$gene, {
 })
 ```
 
-### Gene
+### Comparing genes across tissues
 
 ```{r}
 plotOutput("genes")
 ```
 
 ### Table
+
 ```{r}
 renderDataTable(dat[Symbol %in% gene$gene, c("Symbol", 
                                              "Tissue", 
