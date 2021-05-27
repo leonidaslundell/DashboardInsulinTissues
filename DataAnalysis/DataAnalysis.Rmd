@@ -28,7 +28,6 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE,
                       message = FALSE,
                       root.dir = '../')
-
 ```
 
 ```{r Load functions and data, include=FALSE}
@@ -43,25 +42,23 @@ library(beepr)
 
 # Introduction
 
-While there are many tools summarizing results, none that i know summarize T2D in various tissues. This scrip analyzes, and a diffent flexdashboard script visualizes them.
+While there are many tools summarizing results, none that i know summarize T2D in various tissues. This scrip shows the analysis pipeline, and the results are visualized [here](https://cbmr-eel.shinyapps.io/InsulinResistantTissues/)
 
-# Analysis
-
-## Download the data
+# Download the data
 
 ```{r, message=F}
 library(GEOquery)
 
 # adipose
-gsetAdi <- getGEO("GSE40234", GSEMatrix =TRUE, AnnotGPL = T, destdir = "./data", getGPL = T)
+gsetAdi <- getGEO("GSE40234", GSEMatrix =TRUE, AnnotGPL = T, getGPL = T)
 gsetAdi <- gsetAdi$GSE40234_series_matrix.txt.gz
 
 # beta cell
-gsetBeta <- getGEO("GSE76894", GSEMatrix =TRUE, AnnotGPL = T, destdir = "./data", getGPL = T)
+gsetBeta <- getGEO("GSE76894", GSEMatrix =TRUE, AnnotGPL = T, getGPL = T)
 gsetBeta <- gsetBeta$GSE76894_series_matrix.txt.gz
 
 # skeletal muslce
-gsetSKM <- getGEO("GSE18732", GSEMatrix = TRUE, AnnotGPL = T, destdir = "./data", getGPL = T)
+gsetSKM <- getGEO("GSE18732", GSEMatrix = TRUE, AnnotGPL = T, getGPL = T)
 gsetSKM <- gsetSKM$GSE18732_series_matrix.txt.gz
 ```
 
@@ -140,9 +137,10 @@ dat$skeletal <- list(pheno = pdata,
                      feature = as.data.table(fdata),
                      ex = as.data.table(ex))
 
+n <- sapply(dat, \(x) table(x$pheno$diagnosis)[c("NGT","IR")])
 ```
 
-## Collapsing duplicate gene names and cleaning up pheno data.
+# Collapsing duplicate gene names and cleaning up pheno data.
 
 lapply to take highest average.
 
@@ -240,7 +238,7 @@ colnames(dat) <- c("logFC", "adj.P.Val", "Rank", "variable", "Symbol", "Tissue")
 dat <- dat[,-4]
 setkey(dat, "Symbol")
 
-save(dat, file = "data/results.Rdata")
+save(list = c("dat", "n"), file = "../data/results.Rdata")
 ```
 
 
