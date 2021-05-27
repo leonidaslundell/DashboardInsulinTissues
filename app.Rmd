@@ -1,5 +1,5 @@
 ---
-title: "Diabetes and insulin resistance in three metabolic tissues"
+title: "Type 2 diabetes and insulin resistance in three human metabolic tissues"
 output: 
   flexdashboard::flex_dashboard:
     theme: 
@@ -36,13 +36,14 @@ rank2logFC <- function(x, title = "",
   ggplot(x, mapping = aes(x = Rank, y = logFC, col = adj.P.Val)) +
     geom_point() +
     geom_hline(yintercept = 0, color = "gray") +
-    scale_color_gradient(trans = "log", low = "red", high = "black", 
+    scale_color_gradient(trans = "log", low = "darkred", high = "#502a57", 
                          breaks = c(0, 0.001, 0.05, 0.5)) +
     scale_shape(name = "Tissue") +
     xlab("Rank (high expression -> low expression)") + 
     ylab("logFC (IR/T2D vs NGT)") +
     coord_cartesian(xlim = xZoom, ylim = yZoom) +
-    theme_bw()
+    theme_bw() +
+    theme(text = element_text(size = 14))
   
 }
 
@@ -52,7 +53,7 @@ tissueComp <- function(gene){
     geom_hline(yintercept = 0, color = "black", lty = "dotted", size = 2) +
     geom_blank(data = data.frame(adj.P.Val = c(min(dat$adj.P.Val), 0.05, 1)), 
                aes(col = adj.P.Val), inherit.aes = F) +
-    scale_color_gradient2(low = "red", mid = "darkred", high = "black", midpoint = 0.05,
+    scale_color_gradient2(low = "red", mid = "darkred", high = "#502a57", midpoint = 0.05,
                           breaks = c(0, 0.001, 0.05, 0.1), 
                           limits = c(min(dat$adj.P.Val), 0.1)#midpoint = 0.05
     ) +
@@ -60,19 +61,58 @@ tissueComp <- function(gene){
                                                     beta = "triangle",
                                                     skeletal = "square")) +
     theme_bw() +
+    theme(text = element_text(size = 16),
+          strip.text = element_text(size = 18), ) +
     ylab("logFC (IR/T2D vs NGT)") +
     facet_wrap(~Symbol) 
 }
 
 ```
 
-Column {.sidebar}
+Column {.tabset data-width=150}
 --------------------------------------------------
 
+### Search
+
+Select points on plot to \n visualize genes across tissues.  
+
+Click on selection to zoom in,  double-click to zoom out.  
+
+Manually search for gene(s) \n in the box:  
+
 ```{r}
-textInput("gene", value = "SLC2A4", label = "Type gene of interest")
+#necessary for speed
+ui <- fluidRow(selectizeInput(inputId = "gene", 
+                              choices = NULL, 
+                              multiple = T, 
+                              label = ""),
+               width = 1)
+
+server <- function(input, output){
+  updateSelectizeInput(inputId = "gene", 
+                    choices = unique(dat$Symbol), 
+                    server = TRUE)
+  observeEvent(input$gene, {
+    gene$gene <- input$gene
+  })
+}
+shinyApp(ui = ui, server = server)
 ```
 
+### About this dashboard
+
+This dashboard aims to allow researcherers to quickly explore questions and test ideas about transcriptomics and whole body physiology. It visualizes the gene experssion and log fold change between Type 2 Diabetics (or insulin resistant) and Normal Glucose Tolerant human volunteers in three metabolically important tissues: adipose tissue, skeletal muscle and beta cells.
+
+**A small word of caution: the three tissues compared are analyzed on different transcriptomic platforms. Lack of gene quantification in any one tissue should not be taken to mean absence of expression. Moreover, as this data is from three different studies, the cohorts are different along with any batch effects that this entails. The three studies were selected based on cohort size, and were reanalyzed (but not pre-proccessed) using the same pipeline (limma).**
+
+The data is from the public domain [[1](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE40234), [2](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE18732), [3](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE76894)], and the analysis code can be found [here](https://leonidaslundell.github.io/).
+
+
+```{r}
+n <- t(n)
+rownames(n) <- c("Adipose tissue", "Beta cell", "Skeletal muscle")
+knitr::kable(n, caption = "Number of participants")
+```
 
 Column {data-width=400}
 --------------------------------------------------
@@ -80,36 +120,28 @@ Column {data-width=400}
 ### Adipose tissue
 
 ```{r}
-ranges <- reactiveValues(x = NULL, y = NULL)
-```
-
-**Click once for zooming in, double click for zooming out.**
-
-```{r}
 plotOutput("adiposePlot", brush = "adiposeBrush", click = "adiposeZoomIn", dblclick = "adiposeZoomOut")
 
-output$adiposePlot <- renderPlot(
-  rank2logFC(dat[Tissue == "adipose"&abs(logFC)>.32,], 
-             "Adipose tissue")
-)
+rangesAdipose <- reactiveValues(x = NULL, y = NULL)
+
 output$adiposePlot <- renderPlot(
     rank2logFC(dat[Tissue == "adipose"&abs(logFC)>.32,], 
-               xZoom = ranges$x,
-               yZoom = ranges$y,
-               "Adipose tissue")
+               xZoom = rangesAdipose$x,
+               yZoom = rangesAdipose$y,
+               "adipose tissue")
   )
 
 observeEvent(input$adiposeZoomIn, {
   ga_collect_event(event_category = "Plot manipulation", event_action = "Zooming in")
   if(!is.null(input$adiposeBrush)){
-    ranges$x <- c(input$adiposeBrush$xmin, input$adiposeBrush$xmax)
-    ranges$y <- c(input$adiposeBrush$ymin, input$adiposeBrush$ymax) 
+    rangesAdipose$x <- c(input$adiposeBrush$xmin, input$adiposeBrush$xmax)
+    rangesAdipose$y <- c(input$adiposeBrush$ymin, input$adiposeBrush$ymax) 
   }
 })
 observeEvent(input$adiposeZoomOut, {
   ga_collect_event(event_category = "Plot manipulation", event_action = "Zooming out")
-  ranges$x <- c(NA, NA)
-  ranges$y <- c(NA, NA)
+  rangesAdipose$x <- c(NA, NA)
+  rangesAdipose$y <- c(NA, NA)
 })
 ```
 
@@ -118,28 +150,26 @@ observeEvent(input$adiposeZoomOut, {
 ```{r}
 plotOutput("betaPlot", brush = "betaBrush", click = "betaZoomIn", dblclick = "betaZoomOut")
 
-output$betaPlot <- renderPlot(
-  rank2logFC(dat[Tissue == "beta"&abs(logFC)>.32,], 
-             "beta tissue")
-)
+rangesBeta <- reactiveValues(x = NULL, y = NULL)
+
 output$betaPlot <- renderPlot(
     rank2logFC(dat[Tissue == "beta"&abs(logFC)>.32,], 
-               xZoom = ranges$x,
-               yZoom = ranges$y,
+               xZoom = rangesBeta$x,
+               yZoom = rangesBeta$y,
                "beta tissue")
   )
 
 observeEvent(input$betaZoomIn, {
   ga_collect_event(event_category = "Plot manipulation", event_action = "Zooming in")
   if(!is.null(input$betaBrush)){
-    ranges$x <- c(input$betaBrush$xmin, input$betaBrush$xmax)
-    ranges$y <- c(input$betaBrush$ymin, input$betaBrush$ymax) 
+    rangesBeta$x <- c(input$betaBrush$xmin, input$betaBrush$xmax)
+    rangesBeta$y <- c(input$betaBrush$ymin, input$betaBrush$ymax) 
   }
 })
 observeEvent(input$betaZoomOut, {
   ga_collect_event(event_category = "Plot manipulation", event_action = "Zooming out")
-  ranges$x <- c(NA, NA)
-  ranges$y <- c(NA, NA)
+  rangesBeta$x <- c(NA, NA)
+  rangesBeta$y <- c(NA, NA)
 })
 ```
 
@@ -148,27 +178,25 @@ observeEvent(input$betaZoomOut, {
 ```{r}
 plotOutput("skeletalPlot", brush = "skeletalBrush", click = "skeletalZoomIn", dblclick = "skeletalZoomOut")
 
-output$skeletalPlot <- renderPlot(
-  rank2logFC(dat[Tissue == "skeletal"&abs(logFC)>.32,], 
-             "skeletal tissue")
-)
+rangesSkeletal <- reactiveValues(x = NULL, y = NULL)
+
 output$skeletalPlot <- renderPlot(
     rank2logFC(dat[Tissue == "skeletal"&abs(logFC)>.32,], 
-               xZoom = ranges$x,
-               yZoom = ranges$y,
+               xZoom = rangesSkeletal$x,
+               yZoom = rangesSkeletal$y,
                "skeletal tissue")
   )
 
 observeEvent(input$skeletalZoomIn, {
   if(!is.null(input$skeletalBrush)){
-    ranges$x <- c(input$skeletalBrush$xmin, input$skeletalBrush$xmax)
-    ranges$y <- c(input$skeletalBrush$ymin, input$skeletalBrush$ymax) 
+    rangesSkeletal$x <- c(input$skeletalBrush$xmin, input$skeletalBrush$xmax)
+    rangesSkeletal$y <- c(input$skeletalBrush$ymin, input$skeletalBrush$ymax) 
   }
 })
 observeEvent(input$skeletalZoomOut, {
   ga_collect_event(event_category = "Plot manipulation", event_action = "Zooming out")
-  ranges$x <- c(NA, NA)
-  ranges$y <- c(NA, NA)
+  rangesSkeletal$x <- c(NA, NA)
+  rangesSkeletal$y <- c(NA, NA)
 })
 ```
 
@@ -230,6 +258,7 @@ renderDataTable(dat[Symbol %in% gene$gene, c("Symbol",
                                              "logFC", 
                                              "adj.P.Val", 
                                              "Rank")][order(Symbol)],
-                options = list(paginate = FALSE))
+                options = list(paginate = FALSE,
+                               dom = 't'))
 ```
 
